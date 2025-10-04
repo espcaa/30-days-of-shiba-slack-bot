@@ -164,9 +164,11 @@ func HandleTodayCommand(w http.ResponseWriter, r *http.Request, server structs.S
 		for _, game := range userGames {
 			h := game.TotalTimeToday / 3600
 			m := (game.TotalTimeToday % 3600) / 60
-			s := game.TotalTimeToday % 60
-			sb.WriteString(fmt.Sprintf("\n*%s*\n%s\nTime spent today: %02d:%02d:%02d\n",
-				game.Name, game.Description, h, m, s))
+			sb.WriteString(fmt.Sprintf("\n*%s*\n_%s_\ntime logged today: %02d:%02dh\n",
+				game.Name, game.Description, h, m))
+			if game.TotalTimeToday >= 2*3600 {
+				sb.WriteString(":yay: you got 2 hours, time to send what you added in #shiba!\n")
+			}
 		}
 
 		sendEphemeralSlackMessage(cmd.ResponseURL, sb.String())

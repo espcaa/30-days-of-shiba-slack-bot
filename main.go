@@ -6,13 +6,24 @@ import (
 	"os"
 	"os/signal"
 	"slack-shiba-bot/handlers"
+	"slack-shiba-bot/structs"
+	"slack-shiba-bot/utils"
 	"syscall"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
 )
 
+func NewSlackBot() *structs.SlackBot {
+	return &structs.SlackBot{
+		AirtableClient: utils.CreateAirtableClient(),
+	}
+}
+
 func main() {
+
+	var bot = NewSlackBot()
+
 	log.Printf("Starting the bot...")
 
 	signal.Ignore(syscall.SIGPIPE)
@@ -31,7 +42,7 @@ func main() {
 	})
 
 	r.Post("/slack/today", func(w http.ResponseWriter, r *http.Request) {
-		handlers.HandleTodayCommand(w, r)
+		handlers.HandleTodayCommand(w, r, *bot)
 	})
 
 	// start the server

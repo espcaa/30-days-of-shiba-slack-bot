@@ -3,12 +3,14 @@ package utils
 import (
 	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/mehanizm/airtable"
 )
 
 // everything airtable related
 
 func CreateAirtableClient() airtable.Client {
+	godotenv.Load()
 	var token = os.Getenv("AIRTABLE_API_KEY")
 	client := airtable.NewClient(token)
 	return *client

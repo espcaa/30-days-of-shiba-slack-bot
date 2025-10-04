@@ -23,7 +23,16 @@ func sendEphemeralSlackMessage(responseURL string, text string) {
 		Text:         text,
 	}
 	payload, _ := json.Marshal(msg)
-	http.Post(responseURL, "application/json", bytes.NewBuffer(payload))
+	resp, err := http.Post(responseURL, "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to send ephemeral message: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Printf("[WARN] Slack responded with status %d: %s\n", resp.StatusCode, string(body))
+	}
 }
 
 func SplitAndTrimMulti(s string) []string {
@@ -62,19 +71,29 @@ func HandleTodayCommand(w http.ResponseWriter, r *http.Request, server structs.S
 	w.Write([]byte("Fetching your activity..."))
 
 	go func(cmd structs.SlashCommand) {
+		fmt.Printf("[INFO] Fetching user from Airtable with Slack ID: %s\n", cmd.UserID)
 		table := utils.GetTable(server.AirtableClient, os.Getenv("AIRTABLE_BASE_ID"), "Users")
 		recordsResp, err := table.GetRecords().WithFilterFormula(fmt.Sprintf("{slack id}='%s'", cmd.UserID)).Do()
-		if err != nil || len(recordsResp.Records) == 0 {
-			sendEphemeralSlackMessage(cmd.ResponseURL, "Failed to get user from Airtable or user not found")
+		if err != nil {
+			fmt.Printf("[ERROR] Airtable request failed: %v\n", err)
+			sendEphemeralSlackMessage(cmd.ResponseURL, fmt.Sprintf("Error fetching user: %v", err))
+			return
+		}
+
+		if len(recordsResp.Records) == 0 {
+			fmt.Printf("[WARN] No user found with Slack ID %s\n", cmd.UserID)
+			sendEphemeralSlackMessage(cmd.ResponseURL, "No Airtable user found for your Slack ID")
 			return
 		}
 
 		userRecord := recordsResp.Records[0]
 		linkedGames, ok := userRecord.Fields["Games"].([]any)
 		if !ok || len(linkedGames) == 0 {
-			sendEphemeralSlackMessage(cmd.ResponseURL, "User has no linked games")
+			fmt.Printf("[INFO] User %s has no linked games\n", cmd.UserID)
+			sendEphemeralSlackMessage(cmd.ResponseURL, "You have no linked games in Airtable")
 			return
 		}
+		fmt.Printf("[INFO] User %s has %d linked games\n", cmd.UserID, len(linkedGames))
 
 		gamesTable := utils.GetTable(server.AirtableClient, os.Getenv("AIRTABLE_BASE_ID"), "Games")
 		userGames := []Game{}
@@ -82,12 +101,16 @@ func HandleTodayCommand(w http.ResponseWriter, r *http.Request, server structs.S
 		for _, idAny := range linkedGames {
 			gameID, ok := idAny.(string)
 			if !ok {
+				fmt.Printf("[WARN] Game ID is not a string: %#v\n", idAny)
 				continue
 			}
+
 			gameRecord, err := gamesTable.GetRecord(gameID)
 			if err != nil {
+				fmt.Printf("[WARN] Failed to fetch game %s: %v\n", gameID, err)
 				continue
 			}
+
 			game := Game{}
 			if name, ok := gameRecord.Fields["Name"].(string); ok {
 				game.Name = name
@@ -101,8 +124,10 @@ func HandleTodayCommand(w http.ResponseWriter, r *http.Request, server structs.S
 			userGames = append(userGames, game)
 		}
 
+		fmt.Printf("[INFO] Fetching Hackatime data for user %s\n", cmd.UserID)
 		resp, err := http.Get("https://hackatime.hackclub.com/api/summary?user=" + cmd.UserID + "&interval=today")
 		if err != nil {
+			fmt.Printf("[ERROR] Failed to fetch Hackatime: %v\n", err)
 			sendEphemeralSlackMessage(cmd.ResponseURL, "Failed to fetch Hackatime data")
 			return
 		}
@@ -110,12 +135,14 @@ func HandleTodayCommand(w http.ResponseWriter, r *http.Request, server structs.S
 
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
-			sendEphemeralSlackMessage(cmd.ResponseURL, "Failed to read Hackatime response")
+			fmt.Printf("[ERROR] Failed to read Hackatime response: %v\n", err)
+			sendEphemeralSlackMessage(cmd.ResponseURL, "Failed to read Hackatime data")
 			return
 		}
 
 		today, err := utils.ParseHackatimeSummary(data)
 		if err != nil {
+			fmt.Printf("[ERROR] Failed to parse Hackatime data: %v\n", err)
 			sendEphemeralSlackMessage(cmd.ResponseURL, "Failed to parse Hackatime data")
 			return
 		}
